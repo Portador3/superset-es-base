@@ -28,10 +28,11 @@ ARG LOCALES
 USER root
 # Un comando por RUN a propósito: si falla, el error de Actions indica cuál.
 COPY --from=front /i18n/ /app/superset/translations/
-# messages.mo: lo usa el servidor. Se compila con la librería Babel (dependencia de flask-babel), igual que `pybabel compile`
-# (sin los textos "fuzzy"); no depende de que exista el script pybabel en la imagen.
-RUN set -eu; for l in $LOCALES; do       /app/.venv/bin/python -c "import sys; from babel.messages.pofile import read_po; from babel.messages.mofile import write_mo; l=sys.argv[1]; d='/app/superset/translations/%s/LC_MESSAGES/' % l; write_mo(open(d+'messages.mo','wb'), read_po(open(d+'messages.po','rb'), locale=l))" "$l";     done
-RUN set -eu; for l in $LOCALES; do rm -f "/app/superset/translations/$l/LC_MESSAGES/messages.po"; chmod -R a+rX "/app/superset/translations/$l"; done
+# messages.mo: lo usa el servidor. compile_mo.py equivale a `pybabel compile` pero descarta (en vez de abortar) las traducciones
+# con errores de formato; el .po de `es` de 6.1.0 tiene 14 y `pybabel compile` falla con "14 errors encountered".
+COPY compile_mo.py /tmp/compile_mo.py
+RUN set -eu; for l in $LOCALES; do /app/.venv/bin/python /tmp/compile_mo.py "$l"; done
+RUN set -eu; for l in $LOCALES; do rm -f "/app/superset/translations/$l/LC_MESSAGES/messages.po" /tmp/compile_mo.py; chmod -R a+rX "/app/superset/translations/$l"; done
 # Comprobación: el build falla si falta algún archivo o si el paquete de idioma está casi vacío.
 RUN set -eu; for l in $LOCALES; do       d="/app/superset/translations/$l/LC_MESSAGES";       test -s "$d/messages.mo"; test -s "$d/messages.json";       /app/.venv/bin/python -c "import json,sys; d=json.load(open('$d/messages.json',encoding='utf8')); n=len(d['locale_data']['superset']); print('$l: textos en el paquete =', n); sys.exit(0 if n > 1000 else 1)";     done
 USER superset
