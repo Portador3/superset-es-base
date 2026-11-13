@@ -1,0 +1,49 @@
+name: build-base-es
+
+# Construye Superset con las traducciones compiladas y lo publica en GHCR.
+# Solo hace falta correrlo al cambiar de versión de Superset (o de idiomas).
+on:
+  workflow_dispatch:
+    inputs:
+      superset_version:
+        description: "Versión de Superset (etiqueta de apache/superset)"
+        default: "6.1.0"
+        required: true
+  push:
+    branches: [main]
+    paths: [Dockerfile, .github/workflows/build-base.yml]
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  SUPERSET_VERSION: ${{ inputs.superset_version || '6.1.0' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Nombre de imagen en minúsculas
+        id: img
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            SUPERSET_VERSION=${{ env.SUPERSET_VERSION }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          tags: |
+            ${{ steps.img.outputs.name }}:${{ env.SUPERSET_VERSION }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
