@@ -5,7 +5,8 @@ Equivale a `pybabel compile`, pero en vez de abortar cuando hay traducciones con
 las DESCARTA: esos textos quedan en inglés y el resto se compila. Los textos "fuzzy" tampoco se incluyen
 (igual que pybabel por defecto).
 
-Uso: python compile_mo.py <idioma>
+Uso: python compile_mo.py <idioma> [carpeta-de-traducciones]
+     (por defecto /app/superset/translations; espera <carpeta>/<idioma>/LC_MESSAGES/messages.po)
 """
 import sys
 
@@ -13,7 +14,8 @@ from babel.messages.mofile import write_mo
 from babel.messages.pofile import read_po
 
 lang = sys.argv[1]
-base = f"/app/superset/translations/{lang}/LC_MESSAGES/"
+raiz = sys.argv[2] if len(sys.argv) > 2 else "/app/superset/translations"
+base = f"{raiz}/{lang}/LC_MESSAGES/"
 with open(base + "messages.po", "rb") as f:
     catalogo = read_po(f, locale=lang)
 

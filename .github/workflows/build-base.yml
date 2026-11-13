@@ -1,7 +1,9 @@
 name: build-base-es
 
-# Construye Superset con las traducciones compiladas y lo publica en GHCR.
-# Solo hace falta correrlo al cambiar de versión de Superset (o de idiomas).
+# Prueba, construye y publica Superset con las traducciones compiladas.
+#  - En cualquier rama: pruebas + construcción (sin publicar).
+#  - En main o a mano (workflow_dispatch): lo anterior y, si todo pasa, publica en GHCR.
+# Solo hace falta publicar al cambiar de versión de Superset (o de idiomas).
 on:
   workflow_dispatch:
     inputs:
@@ -10,8 +12,8 @@ on:
         default: "6.1.0"
         required: true
   push:
-    branches: [main]
-    paths: [Dockerfile, compile_mo.py, .github/workflows/build-base.yml]
+    branches: ["**"]
+    paths-ignore: ["**.md"]
 
 permissions:
   contents: read
@@ -21,20 +23,80 @@ env:
   SUPERSET_VERSION: ${{ inputs.superset_version || '6.1.0' }}
 
 jobs:
-  build:
+  pruebas-unitarias:
+    name: Pruebas de compile_mo.py
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install babel==2.17.0 pytest
+      - run: pytest -q tests
+
+  lint-dockerfile:
+    name: Revisión del Dockerfile (hadolint)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+          failure-threshold: error
+
+  imagen:
+    name: Construir, probar y publicar la imagen
+    needs: [pruebas-unitarias, lint-dockerfile]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+
+      - name: Nombre de imagen en minúsculas
+        id: img
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      # 1) Se construye SIN publicar y se carga en el runner para probarla.
+      - name: Construir (sin publicar)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          push: false
+          build-args: |
+            SUPERSET_VERSION=${{ env.SUPERSET_VERSION }}
+          tags: superset-es-base:prueba
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # 2) Pruebas funcionales y de seguridad sobre la imagen construida.
+      - name: Pruebas de la imagen (funcionales y de seguridad)
+        run: bash tests/smoke.sh superset-es-base:prueba es
+
+      # 3) Escaneo de vulnerabilidades. Solo informa (la imagen oficial de Superset ya trae las suyas); no bloquea.
+      - name: Escaneo de vulnerabilidades (Trivy, informativo)
+        uses: aquasecurity/trivy-action@0.28.0
+        continue-on-error: true
+        with:
+          image-ref: superset-es-base:prueba
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "0"
+
+      # 4) Solo en main o a mano, y solo si todo lo anterior pasó: se publica (usa la caché: no recompila).
+      - name: Iniciar sesión en GHCR
+        if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Nombre de imagen en minúsculas
-        id: img
-        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
-      - uses: docker/build-push-action@v6
+
+      - name: Publicar
+        if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+        uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64
