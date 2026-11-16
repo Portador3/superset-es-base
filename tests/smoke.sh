@@ -56,7 +56,7 @@ for _ in $(seq 1 60); do
   sleep 2
 done
 [ "$SALUD" = "OK" ] && ok "Superset arranca y /health responde OK" || { mal "Superset no respondio en /health (respuesta: '$SALUD')"; docker logs "$CID" 2>&1 | tail -30; }
-docker exec "$CID" superset db upgrade >/dev/null 2>&1 && docker exec "$CID" superset init >/dev/null 2>&1 \n  && ok "la base de metadatos se inicializa (db upgrade + init)" || mal "no se pudo inicializar la base de metadatos"
+{ docker exec "$CID" superset db upgrade && docker exec "$CID" superset init; } >/tmp/init.log 2>&1 \n  && ok "la base de metadatos se inicializa (db upgrade + init)" || { mal "no se pudo inicializar la base de metadatos"; tail -25 /tmp/init.log; }
 CODIGO="$(curl -s -o /dev/null -w '%{http_code}' http://localhost:18088/login/ || true)"
 [ "$CODIGO" = "200" ] && ok "la pagina de login carga (HTTP 200)" || mal "login responde HTTP $CODIGO"
 
