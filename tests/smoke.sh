@@ -46,5 +46,20 @@ else
   ok "traducciones sin permiso de escritura global"
 fi
 
+echo "== Arranque =="
+CID="$(docker run -d -e SUPERSET_SECRET_KEY="$(head -c 24 /dev/urandom | base64)" -p 18088:8088 "$IMG")"
+trap 'docker rm -f "$CID" >/dev/null 2>&1' EXIT
+SALUD=""
+for _ in $(seq 1 60); do
+  SALUD="$(curl -fsS http://localhost:18088/health 2>/dev/null || true)"
+  [ -n "$SALUD" ] && break
+  sleep 2
+done
+[ "$SALUD" = "OK" ] && ok "Superset arranca y /health responde OK" || { mal "Superset no respondio en /health (respuesta: '$SALUD')"; docker logs "$CID" 2>&1 | tail -30; }
+{ docker exec "$CID" superset db upgrade && docker exec "$CID" superset init; } >/tmp/init.log 2>&1 \
+  && ok "la base de metadatos se inicializa (db upgrade + init)" || { mal "no se pudo inicializar la base de metadatos"; tail -25 /tmp/init.log; }
+CODIGO="$(curl -s -o /dev/null -w '%{http_code}' http://localhost:18088/login/ || true)"
+[ "$CODIGO" = "200" ] && ok "la pagina de login carga (HTTP 200)" || mal "login responde HTTP $CODIGO"
+
 echo
 if [ "$FALLOS" -eq 0 ]; then echo "TODO OK"; else echo "$FALLOS comprobaciones fallaron"; exit 1; fi
